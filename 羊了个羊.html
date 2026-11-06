@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>憋笑消除 · 奶蛙救公主</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body {
+    font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background: radial-gradient(circle at 50% 0%, #2b1d4a 0%, #120c22 60%, #080512 100%);
+    color:#f3ecff; display:flex; align-items:center; justify-content:center;
+    overflow:hidden; user-select:none;
+  }
+  #app { width:100%; max-width:460px; height:100%; max-height:820px; display:flex; flex-direction:column; padding:12px; position:relative; }
+
+  /* 顶部信息栏 */
+  #hud { display:flex; justify-content:space-between; align-items:center; padding:8px 4px; font-size:14px; }
+  #hud .stat { display:flex; flex-direction:column; align-items:center; gap:2px; }
+  #hud .stat b { font-size:18px; color:#ffd86b; }
+  #hud .stat span { font-size:11px; opacity:.65; }
+  #title { text-align:center; font-size:13px; letter-spacing:2px; opacity:.55; padding:4px 0 8px; }
+
+  /* 卡槽 */
+  #slots { display:flex; justify-content:center; gap:6px; margin:6px 0 14px; }
+  .slot {
+    width:48px; height:48px; border-radius:12px;
+    border:2px dashed rgba(255,255,255,.18);
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px; transition:.15s;
+  }
+  .slot.filled { border-style:solid; border-color:rgba(255,216,107,.5); background:rgba(255,255,255,.06); }
+  .slot.danger { animation:shake .3s; border-color:#ff6b6b; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+
+  /* 棋盘区 */
+  #board { flex:1; position:relative; display:flex; align-items:center; justify-content:center; }
+  #stack { position:relative; width:100%; height:100%; }
+
+  .card {
+    position:absolute; width:58px; height:58px; border-radius:14px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:32px; cursor:pointer;
+    background:linear-gradient(160deg,#3a2a5e,#261a42);
+    border:2px solid rgba(255,255,255,.12);
+    box-shadow:0 4px 0 rgba(0,0,0,.35), 0 6px 14px rgba(0,0,0,.3);
+    transition: transform .12s, box-shadow .12s, opacity .2s;
+    will-change:transform;
+  }
+  .card:active { transform:scale(.92); }
+  .card.blocked { filter:brightness(.45) saturate(.5); cursor:not-allowed; }
+  .card.blocked::after {
+    content:""; position:absolute; inset:0; border-radius:12px;
+    background:rgba(8,5,18,.45);
+  }
+  .card.pop { animation:pop .25s forwards; }
+  @keyframes pop { to { transform:scale(1.35); opacity:0; } }
+
+  /* 底部按钮 */
+  #actions { display:flex; gap:10px; padding:10px 4px 4px; }
+  .btn {
+    flex:1; padding:12px; border-radius:14px; border:none; font-size:15px; font-weight:600;
+    background:linear-gradient(180deg,#5b3fa8,#3d2a75); color:#fff;
+    box-shadow:0 4px 0 #241a45; cursor:pointer; transition:.1s;
+  }
+  .btn:active { transform:translateY(3px); box-shadow:0 1px 0 #241a45; }
+  .btn:disabled { opacity:.35; cursor:not-allowed; box-shadow:0 4px 0 #241a45; transform:none; }
+  .btn.ghost { background:linear-gradient(180deg,#2c2148,#1d1633); box-shadow:0 4px 0 #120d24; }
+
+  /* 遮罩层 */
+  #overlay {
+    position:absolute; inset:0; background:rgba(8,5,18,.88);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; padding:24px; text-align:center; z-index:50; border-radius:12px;
+    backdrop-filter:blur(4px);
+  }
+  #overlay.hidden { display:none; }
+  #overlay h1 { font-size:26px; color:#ffd86b; letter-spacing:2px; }
+  #overlay p { font-size:14px; line-height:1.7; opacity:.8; max-width:300px; }
+  #overlay .big { font-size:15px; padding:14px 36px; }
+
+  /* 飘字 */
+  .float {
+    position:absolute; font-size:15px; font-weight:700; color:#ffd86b;
+    pointer-events:none; animation:floatUp .8s forwards; z-index:40;
+  }
+  @keyframes floatUp { to { transform:translateY(-46px); opacity:0; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="stat"><b id="score">0</b><span>憋笑值</span></div>
+    <div class="stat"><b id="combo">0</b><span>连击</span></div>
+    <div class="stat"><b id="left">0</b><span>剩余牌</span></div>
+  </div>
+  <div id="title">憋 笑 消 除 · 奶 蛙 救 公 主</div>
+
+  <div id="slots"></div>
+
+  <div id="board">
+    <div id="stack"></div>
+  </div>
+
+  <div id="actions">
+    <button class="btn ghost" id="btnUndo">撤销</button>
+    <button class="btn" id="btnShuffle">洗牌</button>
+  </div>
+
+  <div id="overlay">
+    <h1>憋 笑 消 除</h1>
+    <p>点击牌面放进下方 7 个卡槽，<br>凑齐 3 张相同的就能笑出声消除！<br>卡槽满了还没消除——憋笑失败。</p>
+    <button class="btn big" id="btnStart">开始憋笑</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const EMOJIS = ["🐸","😂","🤣","😆","😹","🐱","👑","🍼"];
+  const SLOT_MAX = 7;
+  const CARD_W = 58, CARD_H = 58;
+
+  const el = {
+    slots: document.getElementById("slots"),
+    stack: document.getElementById("stack"),
+    score: document.getElementById("score"),
+    combo: document.getElementById("combo"),
+    left: document.getElementById("left"),
+    overlay: document.getElementById("overlay"),
+    btnStart: document.getElementById("btnStart"),
+    btnUndo: document.getElementById("btnUndo"),
+    btnShuffle: document.getElementById("btnShuffle"),
+  };
+
+  let state = null;
+
+  function rand(n){ return Math.floor(Math.random()*n); }
+
+  /* ---------- 生成关卡 ---------- */
+  function buildLevel() {
+    // 每种表情生成 3 的倍数张，总牌数 = 3 * n
+    const groups = 8;              // 8 种表情
+    const triplesPerType = 4;      // 每种 4 组 = 12 张
+    let cards = [];
+    for (let i = 0; i < groups; i++) {
+      for (let t = 0; t < triplesPerType * 3; t++) {
+        cards.push({ type: i });
+      }
+    }
+    // 洗牌
+    for (let i = cards.length - 1; i > 0; i--) {
+      const j = rand(i + 1);
+      [cards[i], cards[j]] = [cards[j], cards[i]];
+    }
+
+    // 布局：多层堆叠，制造遮挡
+    const boardW = el.stack.clientWidth || 360;
+    const boardH = el.stack.clientHeight || 420;
+    const layers = 5;
+    const result = [];
+    let idx = 0;
+
+    for (let layer = 0; layer < layers; layer++) {
+      const count = Math.min(cards.length - idx, 12 + layer * 2);
+      for (let k = 0; k < count && idx < cards.length; k++, idx++) {
+        const c = cards[idx];
+        // 每层网格位置 + 随机偏移
+        const cols = 5, rows = 5;
+        const col = k % cols, row = Math.floor(k / cols);
+        const cellW = (boardW - CARD_W - 20) / (cols - 1 || 1);
+        const cellH = (boardH - CARD_H - 20) / (rows - 1 || 1);
+        let x = 10 + col * cellW + (rand(12) - 6);
+        let y = 10 + row * cellH + (rand(12) - 6) - layer * 8;
+        x = Math.max(4, Math.min(boardW - CARD_W - 4, x));
+        y = Math.max(4, Math.min(boardH - CARD_H - 4, y));
+
+        result.push({
+          id: idx,
+          type: c.type,
+          x, y, layer,
+          removed: false
+        });
+      }
+      if (idx >= cards.length) break;
+    }
+
+    // 如果还有剩余牌，随机补进去
+    while (idx < cards.length) {
+      const c = cards[idx];
+      result.push({
+        id: idx, type: c.type,
+        x: 10 + rand(Math.max(1, boardW - CARD_W - 20)),
+        y: 10 + rand(Math.max(1, boardH - CARD_H - 20)),
+        layer: layers, removed: false
+      });
+      idx++;
+    }
+
+    // 计算遮挡关系：后渲染(layer大)覆盖先渲染
+    result.sort((a,b) => a.layer - b.layer);
+    result.forEach((c, i) => c.z = i);
+
+    return result;
+  }
+
+  /* ---------- 判断是否被遮挡 ---------- */
+  function isBlocked(card, all) {
+    for (const o of all) {
+      if (o.removed || o === card) continue;
+      if (o.z <= card.z) continue;
+      // 矩形重叠判定
+      const overlap = !(
+        o.x + CARD_W <= card.x ||
+        card.x + CARD_W <= o.x ||
+        o.y + CARD_H <= card.y ||
+        card.y + CARD_H <= o.y
+      );
+      if (overlap) return true;
+    }
+    return false;
+  }
+
+  /* ---------- 渲染 ---------- */
+  function render() {
+    // 卡槽
+    el.slots.innerHTML = "";
+    for (let i = 0; i < SLOT_MAX; i++) {
+      const d = document.createElement("div");
+      d.className = "slot" + (state.slots[i] ? " filled" : "");
+      d.textContent = state.slots[i] ? EMOJIS[state.slots[i]] : "";
+      el.slots.appendChild(d);
+    }
+
+    // 牌堆
+    el.stack.innerHTML = "";
+    const active = state.cards.filter(c => !c.removed);
+    for (const c of active) {
+      const d = document.createElement("div");
+      d.className = "card";
+      d.style.left = c.x + "px";
+      d.style.top = c.y + "px";
+      d.style.zIndex = c.z;
+      d.textContent = EMOJIS[c.type];
+      const blocked = isBlocked(c, active);
+      if (blocked) d.classList.add("blocked");
+      d.addEventListener("click", () => onCardClick(c));
+      el.stack.appendChild(d);
+    }
+
+    el.score.textContent = state.score;
+    el.combo.textContent = state.combo;
+    el.left.textContent = active.length;
+    el.btnUndo.disabled = state.history.length === 0;
+    el.btnShuffle.disabled = state.shuffles <= 0;
+  }
+
+  /* ---------- 点击卡牌 ---------- */
+  function onCardClick(card) {
+    if (!state.running) return;
+    const active = state.cards.filter(c => !c.removed);
+    if (isBlocked(card, active)) return;
+    if (state.slots.length >= SLOT_MAX) return;
+
+    // 播放弹出动画
+    const node = [...el.stack.children].find(n =>
+      n.style.left === card.x + "px" && n.style.top === card.y + "px" && n.style.zIndex == card.z
+    );
+    if (node) { node.classList.add("pop"); }
+
+    card.removed = true;
+    state.history.push({ cardId: card.id });
+    state.slots.push(card.type);
+    sortSlots();
+    checkMatch();
+
+    setTimeout(render, 200);
+  }
+
+  function sortSlots() {
+    state.slots.sort((a,b) => a - b);
+  }
+
+  function checkMatch() {
+    const counts = {};
+    for (const t of state.slots) counts[t] = (counts[t] || 0) + 1;
+    for (const t in counts) {
+      if (counts[t] >= 3) {
+        // 消除 3 张
+        let removed = 0;
+        state.slots = state.slots.filter(v => {
+          if (v === Number(t) && removed < 3) { removed++; return false; }
+          return true;
+        });
+        state.combo++;
+        const gain = 10 + state.combo * 2;
+        state.score += gain;
+        state.slots = state.slots.filter(v => v !== undefined);
+        floatText("+" + gain + (state.combo > 1 ? " 连击!" : ""));
+        break;
+      }
+    }
+    // 检查失败：卡槽满且无三连
+    if (state.slots.length >= SLOT_MAX) {
+      const c = {};
+      for (const t of state.slots) c[t] = (c[t] || 0) + 1;
+      const hasTriple = Object.values(c).some(v => v >= 3);
+      if (!hasTriple) return lose();
+    }
+    // 检查胜利
+    if (state.cards.every(c => c.removed) && state.slots.length === 0) win();
+  }
+
+  function floatText(txt) {
+    const d = document.createElement("div");
+    d.className = "float";
+    d.textContent = txt;
+    d.style.left = "50%";
+    d.style.top = "40%";
+    d.style.transform = "translateX(-50%)";
+    el.board.appendChild(d);
+    setTimeout(() => d.remove(), 800);
+  }
+
+  /* ---------- 撤销 / 洗牌 ---------- */
+  function undo() {
+    if (state.history.length === 0 || !state.running) return;
+    const last = state.history.pop();
+    const card = state.cards.find(c => c.id === last.cardId);
+    if (card && card.removed) {
+      card.removed = false;
+      // 从卡槽移除最后一张同类型
+      const i = state.slots.lastIndexOf(card.type);
+      if (i >= 0) state.slots.splice(i, 1);
+      state.combo = 0;
+      render();
+    }
+  }
+
+  function shuffle() {
+    if (state.shuffles <= 0 || !state.running) return;
+    state.shuffles--;
+    const active = state.cards.filter(c => !c.removed);
+    const boardW = el.stack.clientWidth || 360;
+    const boardH = el.stack.clientHeight || 420;
+    for (const c of active) {
+      c.x = 10 + rand(Math.max(1, boardW - CARD_W - 20));
+      c.y = 10 + rand(Math.max(1, boardH - CARD_H - 20));
+    }
+    render();
+  }
+
+  /* ---------- 开始 / 结束 ---------- */
+  function start() {
+    state = {
+      cards: [],
+      slots: [],
+      score: 0,
+      combo: 0,
+      history: [],
+      shuffles: 3,
+      running: true
+    };
+    el.overlay.classList.add("hidden");
+    // 等待布局稳定
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        state.cards = buildLevel();
+        render();
+      });
+    });
+  }
+
+  function lose() {
+    state.running = false;
+    showOverlay("憋 笑 失 败",
+      `卡槽满了，没能凑出三连。<br>本次憋笑值：<b style="color:#ffd86b">${state.score}</b><br>最高连击：${state.combo}`,
+      "再来一次", start);
+  }
+
+  function win() {
+    state.running = false;
+    showOverlay("哈 哈 哈 ！",
+      `你把魔王也逗笑了！<br>憋笑值：<b style="color:#ffd86b">${state.score}</b><br>连击：${state.combo}`,
+      "再救一次", start);
+  }
+
+  function showOverlay(title, desc, btnText, cb) {
+    el.overlay.innerHTML = "";
+    const h = document.createElement("h1"); h.textContent = title;
+    const p = document.createElement("p"); p.innerHTML = desc;
+    const b = document.createElement("button"); b.className = "btn big"; b.textContent = btnText;
+    b.addEventListener("click", cb);
+    el.overlay.append(h, p, b);
+    el.overlay.classList.remove("hidden");
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  el.btnStart.addEventListener("click", start);
+  el.btnUndo.addEventListener("click", undo);
+  el.btnShuffle.addEventListener("click", shuffle);
+
+  // 窗口尺寸变化时重排（简单处理：保留位置，仅重渲染）
+  window.addEventListener("resize", () => { if (state && state.running) render(); });
+
+  // 初始占位
+  el.stack.innerHTML = "";
+})();
+</script>
+</body>
+</html>
